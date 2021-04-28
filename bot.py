@@ -1,103 +1,104 @@
-import telebot, re, requests
-from requests import ReadTimeout, ConnectTimeout, HTTPError, Timeout, ConnectionError
-from telebot import types
+import pymysql
+import configparser
+import aiogram
+from aiogram.contrib.fsm_storage.redis import RedisStorage2
+from keyboard import markups
+from states import states
 
-bot = telebot.AsyncTeleBot('')
+config = configparser.ConfigParser()
+config.read("config.ini")
 
-keyboardCity = telebot.types.ReplyKeyboardMarkup()
-keyboardCity.row('Москва','Избранное')
-#keyboardCity.row('Избранное')
+DB_HOST = config["Datebase"]["host"]
+DB_USERNAME = config["Datebase"]["username"]
+DB_PASSWORD = config["Datebase"]["password"]
+DB_NAME = config["Datebase"]["name_db"]
 
-keyboardCat1 = telebot.types.ReplyKeyboardMarkup()
-keyboardCat1.row('до 5к', 'до 10к', 'до 15к', 'VIP')
-keyboardCat1.row('Розы', 'Свадебные', 'Оптом')
-keyboardCat1.row('Избранное', 'Назад')
+connection = pymysql.connect(
+    host=DB_HOST, user=DB_USERNAME, password=DB_PASSWORD,
+    db=DB_NAME, autocommit=True
+)
+cursor = connection.cursor(pymysql.cursors.DictCursor)
 
-keyboardCat2 = telebot.types.ReplyKeyboardMarkup()
-keyboardCat2.row('Авторские','Моно\Дуо','Не имеет Значения')
-keyboardCat2.row('Избранное','Назад')
+API_TOKEN = "1607900006:AAFUzmWn5lruUEsVkRWYa_fvZw52cFA9xzE"
 
-keyboardControl = telebot.types.ReplyKeyboardMarkup()
-keyboardControl.row('Еще 3','Предыдущие 3')
-keyboardControl.row('Избранное','Назад')
+storage = RedisStorage2()
+bot = aiogram.Bot(token=API_TOKEN)
+dp = aiogram.Dispatcher(bot, storage=storage)
+dp.middleware.setup(aiogram.middlewares.BaseMiddleware())
 
-keyboardInline = telebot.types.InlineKeyboardMarkup()
-buyButton = telebot.types.InlineKeyboardButton(text='Купить', url='https://yandex.ru')
-favoritButton = telebot.types.InlineKeyboardButton(text='В Избранное',url='')
-instaButton = telebot.types.InlineKeyboardButton(text='Инстаграмм', url='https://instagramm.com')
+FormState = states.FormState()
 
-@bot.message_handler(commands=['start'])
-def startMenu(message):
-    if message.text == '/start':
-        bot.send_message(message.chat.id, "Привет, " + message.chat.first_name, reply_markup=keyboardCity)
-        bot.register_next_step_handler(message, startChain)
 
-def startChain(message):
-    if message.text == 'Москва':
-        #вывод меню с фильтрами поиском по каталогу
-        #кнопки до5000 до10000 до15000 VIP Розы Свадебные КупитьОптом Избранное Назад
-        bot.send_message(message.chat.id, "Выберите категорю ", reply_markup = keyboradCat1)
-        bot.register_next_step_handler(message, filt)
+@dp.message_handler(commands=['start'], state='*')
+async def process_start_command(message: aiogram.types.Message):
+    sql = "SELECT COUNT(*) FROM users WHERE `user.id` = " + \
+        str(message.from_user.id) + ";"
 
-    if message.text == 'Санкт-Петербург':
+    cursor.execute(sql)
+    result = cursor.fetchone()
 
-        bot.send_message(message.chat.id, '404 Not Found, plz call you administrator', reply_markup = keyboardCat1)
-        bot.register_next_step_handler(message, startChain)
+    msg_text = '''Привет! 👋
+🤖 Я бот-магазин по подаже товаров любой категории.
 
-    if message.text == 'Избранное':
+🛍️ Чтобы перейти в каталог и выбрать приглянувшиеся товары возпользуйтесь командой /menu.'''
 
-        bot.register_next_step_handler(message, menuFavorit)
+    if result['COUNT(*)'] == 0:
+        await message.answer(msg_text,
+                             reply_markup=aiogram.types.ReplyKeyboardRemove())
 
-def filt(message):
-    
-    #вывод второго фильтра
-    #кнопки авторскиеБукеты Моно\ДуоБукеты НеимеетЗначения Избранное назад
-    
-    if message.text == 'Избранное':
-
-        bot.register_next_step_handler(message, menuFavorit)
-
-    elif message.text == 'Назад':
-
-        bot.register_next_step_handler(message, startChain)
+        sql = "1INSERT INTO `users` (`id`, `user.id`, `chat_id`, `name`) VALUES (NULL, " + str(
+            message.from_user.id) + ", '" + str(message.chat.id) + "', '" + message.chat.first_name + "');"
+        cursor.execute(sql)
 
     else:
-        bot.send_message(messsage.chat.id, "", reply_markup=keyboardCat2)
-        bot.register_next_step_handler(message, filt2, message.text)
-
-def filt2(message, cat1):
-    # Вывод по 3 картинки
-    # Под каждой картинкой 3 кнопки(купить, в избранное, перейти в инсту) + описании картинка(цена)
-    # клава: еще 3, предыд 3, назад, избранное
-
-    #Запрос в БД по 2 фильтрам, вывод по 3
-
-    bot.send_message(message.chat.id, "", reply_markup = keyboardControl)
-    bot.register_next_step_handler(message, out)
-
-    if message.text == 'Избранное':
-
-        bot.register_next_step_handler(message, menuFavorit)
-
-    if message.text == 'Назад':
-
-        bot.register_next_step_handler(message, startChain)
-
-def out(message)
-    # Вывод по 3 картинки
-    # Под каждой картинкой 3 кнопки(купить, в избранное, перейти в инсту) + описании картинка(цена)
-    # клава: еще 3, предыд 3, назад, избранное
-
-    bot.send_message(message.chat.id, "", reply_markup = keyboardControl)
-    bot.register_next_step_handler(message, out)
-
-    if message.text == 'Избранное':
-
-        bot.register_next_step_handler(message, menuFavorit)
-
-    if message.text == 'Назад':
-
-        bot.register_next_step_handler(message, startChain)
+        await message.answer(msg_text,
+                             reply_markup=aiogram.types.ReplyKeyboardRemove())
 
 
-bot.polling(none_stop=True, interval=0) 
+@dp.message_handler(commands=['help'], state='*')
+async def process_help_command(message: aiogram.types.Message):
+    await message.answer("Напиши мне что-нибудь")
+
+
+@dp.message_handler(commands=['menu'], state='*')
+async def process_start_menu(message: aiogram.types.Message):
+    await message.answer('Выберите город', reply_markup=markups.city_markup())
+    await FormState.state_start_menu.set()
+    await FormState.next()
+
+
+@dp.message_handler(state=FormState.state_select_filter)
+async def process_select_filter(message: aiogram.types.Message):
+    await message.answer('Выберите категорию',
+                         reply_markup=markups.filter_markup())
+    await FormState.next()
+
+
+@dp.message_handler(state=FormState.state_select_category)
+async def process_select_category(message: aiogram.types.Message):
+    if message.text == markups.filter_category[6]:
+        await message.answer('Если вы хотите приобрести цветы оптом, пожалуйста, напишите нам @flowboo_support')
+    elif message.text == markups.filter_category[4]:
+        await message.answer('Rose out', reply_markup=markups.control_markup())
+        await FormState.state_out.set()
+    elif message.text == markups.filter_category[5]:
+        await message.answer('Marry out', reply_markup=markups.control_markup())
+        await FormState.state_out.set()
+    else:
+        await message.answer('Выберите 2 категрию',
+                             reply_markup=markups.category_markup())
+        await FormState.next()
+
+
+@dp.message_handler(state=FormState.state_out)
+async def process_out(message: aiogram.types.Message):
+    if message.text == markups.back_message:
+        await message.answer('Выберите категорию',
+                             reply_markup=markups.filter_markup())
+        await FormState.state_select_filter.set()
+        await FormState.next()
+    else:
+        await message.answer('Out', reply_markup=markups.control_markup())
+
+if __name__ == '__main__':
+    aiogram.executor.start_polling(dp)
